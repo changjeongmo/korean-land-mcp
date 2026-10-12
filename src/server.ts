@@ -13,9 +13,11 @@ import { getUrbanFacilityTool } from "./tools/get_urban_facility.js";
 import { getOtherLawDesignationsTool } from "./tools/get_other_law_designations.js";
 import { getLandAttributesTool } from "./tools/get_land_attributes.js";
 import { analyzeParcelTool } from "./tools/analyze_parcel.js";
+import { getCadastralMapTool } from "./tools/get_cadastral_map.js";
 
 dotenv.config();
 
+function createServer(): McpServer {
 const server = new McpServer({
   name: "korean-land-mcp",
   version: "2.0.0",
@@ -109,6 +111,7 @@ server.tool(
           "- get_other_law_designations(query): 38개 개별법령 지정 (국계법 76조⑤ 우선위임 힌트 포함)",
           "- get_land_attributes(query): 지목 파싱 + 공시지가 + 건물 유무",
           "- analyze_parcel(query): 위 전체를 1회 호출로 체이닝",
+          "- get_cadastral_map(query, buffer_m?): 연속지적도(지적도+임야도) PNG + 면적",
           "",
           "Legal citations (법령·조례 원문) are intentionally out of scope — use korean-law MCP.",
         ].join("\n"),
@@ -117,27 +120,78 @@ server.tool(
   })
 );
 
+server.tool(
+  "get_cadastral_map",
+  "Draw the 연속지적도 (지적도+임야도 merged cadastral map) around a parcel as a PNG image: target parcel in red, neighbouring parcels with 지번·지목 labels, scale bar. Also returns 면적(㎡·평) from V-World 토지특성. Use for 입지분석·기획설계 site context. For 임야 include '산' in the address.",
+  {
+    ...QUERY_SCHEMA,
+    buffer_m: z
+      .number()
+      .int()
+      .min(20)
+      .max(500)
+      .optional()
+      .describe("대상 필지 바깥으로 보여줄 범위(미터). 기본 60, 20~500."),
+  },
+  getCadastralMapTool
+);
+
+return server;
+}
+
 const transportType = process.env.MCP_TRANSPORT || "stdio";
 
 if (transportType === "http") {
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: "4mb" }));
 
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
+  // Optional shared-secret auth for public deployments (Claude custom connector → Request headers).
+  const TOKEN = (process.env.MCP_TOKEN || "").trim();
+  app.use("/mcp", (req, res, next) => {
+    if (!TOKEN) return next();
+    const auth = req.header("authorization") || "";
+    const got = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7) : String(req.query.token ?? "");
+    if (got !== TOKEN) return res.status(401).json({ error: "unauthorized" });
+    next();
   });
-  await server.connect(transport);
 
+  app.get(["/", "/health"], (_req, res) => {
+    res.type("text/plain").send("korean-land-mcp OK — endpoint: /mcp");
+  });
+
+  // Stateless Streamable HTTP: a fresh server+transport per request, so every Claude
+  // reconnect (mobile app, web, desktop) can initialize without session conflicts.
   app.post("/mcp", async (req, res) => {
-    await transport.handleRequest(req, res, req.body);
+    const server = createServer();
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    res.on("close", () => {
+      transport.close();
+      server.close();
+    });
+    try {
+      await server.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+    } catch (e) {
+      console.error("MCP request error", e);
+      if (!res.headersSent) {
+        res.status(500).json({ jsonrpc: "2.0", error: { code: -32603, message: "Internal server error" }, id: null });
+      }
+    }
   });
 
-  const PORT = process.env.PORT || 3000;
-  app.listen(PORT, () => {
-    console.error(`HTTP MCP on :${PORT}/mcp`);
+  const methodNotAllowed = (_req: express.Request, res: express.Response) => {
+    res.status(405).json({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed." }, id: null });
+  };
+  app.get("/mcp", methodNotAllowed);
+  app.delete("/mcp", methodNotAllowed);
+
+  const PORT = Number(process.env.PORT || 3000);
+  app.listen(PORT, "0.0.0.0", () => {
+    console.error(`korean-land-mcp v2.0 HTTP on :${PORT}/mcp (auth ${TOKEN ? "on" : "off"})`);
   });
 } else {
+  const server = createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("korean-land-mcp v2.0 ready (stdio) — 7 tools wired");
+  console.error("korean-land-mcp v2.0 ready (stdio) — 8 tools wired");
 }

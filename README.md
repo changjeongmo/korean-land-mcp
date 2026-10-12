@@ -71,6 +71,23 @@ configure 가 끝나면 붙여넣을 JSON 블록을 터미널에 출력합니다
 }
 ```
 
+
+## 📱 Claude 커스텀 커넥터(원격 MCP)로 배포 — 스마트폰 Claude 앱용
+
+이 포크는 원격 사용을 위해 다음을 보완했습니다: 재접속 시 400 오류가 나던 HTTP 세션 문제(무상태 처리), Docker 빌드 실패(typescript 누락), 접근 토큰 인증, `/health` 확인 주소, 지적도 그림 도구 `get_cadastral_map`(면적 포함).
+
+**반드시 국내 리전에 배포하세요.** V-World는 해외 IP 접속을 차단할 수 있습니다.
+
+| 환경변수 | 값 |
+|---|---|
+| `VWORLD_API_KEY` | V-World 인증키 |
+| `VWORLD_DOMAIN` | 배포 주소(V-World 인증키의 서비스 URL과 동일) |
+| `MCP_TOKEN` | 커넥터 접근용 비밀 문자열 |
+| `MCP_TRANSPORT` | `http` (Dockerfile에 기본 설정됨) |
+| `PORT` | `8080` (Dockerfile 기본) |
+
+Claude 등록: claude.ai → 설정 → 커넥터 → 커스텀 커넥터 → URL `https://<배포주소>/mcp`, 인증 No sign in, 요청 헤더 `Authorization: Bearer <MCP_TOKEN>`.
+
 ## 💬 사용 예시
 
 - "경기도 평택시 포승읍 내기리 680 용도지역 알려줘" → `get_zoning`
