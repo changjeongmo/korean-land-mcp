@@ -17,12 +17,13 @@ import { getTransitAccessTool } from "./tools/get_transit_access.js";
 import { getDriveTimesTool } from "./tools/get_drive_times.js";
 import { getNearbyFacilitiesTool } from "./tools/get_nearby_facilities.js";
 import { KAKAO_CATEGORIES } from "./lib/kakao.js";
+import { searchPublicDataTool, describePublicApiTool, callPublicApiTool } from "./tools/public_data.js";
 dotenv.config();
 function createServer() {
     const server = new McpServer({
         name: "korean-land-mcp",
-        version: "2.1.0",
-        description: "Korean parcel & zoning MCP backed by V-World. Resolves addresses/PNUs into spatial facts (필지, 용도지역/지구/구역, 지구단위계획, 도시계획시설, 다른 법령 지정사항). Also: 국토부 실거래가 (DATA_GO_KR_KEY) and 교통·생활인프라 (KAKAO_REST_KEY). No mock fallback — failures are real errors. For 법령·조례 text, pair with korean-law MCP.",
+        version: "2.2.0",
+        description: "Korean parcel & zoning MCP backed by V-World. Resolves addresses/PNUs into spatial facts (필지, 용도지역/지구/구역, 지구단위계획, 도시계획시설, 다른 법령 지정사항). Also: 국토부 실거래가 (DATA_GO_KR_KEY) and 교통·생활인프라 (KAKAO_REST_KEY). Plus 공공데이터포털 전체 게이트웨이(search_public_data → describe_public_api → call_public_api): 오픈API 1만여 종·파일데이터를 검색·명세확인·호출. No mock fallback — failures are real errors. For 법령·조례 text, pair with korean-law MCP.",
     });
     const QUERY_SCHEMA = {
         query: z
@@ -51,7 +52,7 @@ function createServer() {
             {
                 type: "text",
                 text: [
-                    "korean-land-mcp v2.1 — V-World + 실거래가 + 교통 (mock fallback 없음)",
+                    "korean-land-mcp v2.2 — V-World + 실거래가 + 교통 (mock fallback 없음)",
                     "",
                     "Tools:",
                     "- resolve_parcel(query): address|PNU → canonical parcel",
@@ -120,6 +121,30 @@ function createServer() {
         radius_m: z.number().int().min(50).max(20000).optional().describe("반경(m). 기본 1000"),
         max_per_category: z.number().int().min(1).max(45).optional().describe("카테고리별 최대 목록 수. 기본 10"),
     }, getNearbyFacilitiesTool);
+    // ───────── 공공데이터포털 전체 게이트웨이 (DATA_GO_KR_KEY) ─────────
+    server.tool("search_public_data", "공공데이터포털(data.go.kr) 전체 카탈로그 검색 — 오픈API 1만여 종(kind='openapi', 기본)과 파일·표준 데이터셋(kind='dataset'). 키워드는 API 이름에 부분일치(첫 단어로 서버 검색, 나머지 단어는 AND 필터). 결과: list_id, 이름, 제공기관, 자동승인 여부, 오퍼레이션 목록, 상세페이지 링크. 전용 도구(실거래가·교통 등)가 없는 공공데이터는 모두 이 도구로 시작하세요. 예: '공시지가', '건축인허가', '경매', '상가 상권', '아파트 분양', '전기차 충전소', '인구 이동'. Requires DATA_GO_KR_KEY + 목록조회서비스(15077093) 활용신청(자동승인).", {
+        keyword: z.string().min(1).describe("검색어(한글). 여러 단어면 첫 단어로 검색 후 나머지로 필터. 예: '개별공시지가', '건축 인허가'"),
+        org: z.string().optional().describe("제공기관명 부분일치 필터. 예: '국토교통부', '서울특별시', '한국부동산원'"),
+        kind: z.enum(["openapi", "dataset", "all"]).optional().describe("openapi(기본)=오픈API, dataset=파일·표준 데이터셋 포함 목록, all=둘 다"),
+        page: z.number().int().min(1).optional().describe("결과 페이지(기본 1)"),
+        per_page: z.number().int().min(1).max(50).optional().describe("페이지당 API 수(기본 15)"),
+    }, searchPublicDataTool);
+    server.tool("describe_public_api", "공공데이터 오픈API 명세 조회: list_id(search_public_data 결과)로 오퍼레이션별 호출 URL(call_url)·요청변수·응답항목, 데이터포맷, 자동승인 여부, 활용신청 링크를 반환. odcloud형(api.odcloud.kr)·POST형은 Swagger를 자동 해석. 파일데이터는 swagger_url을 직접 넣어도 됩니다. call_public_api 전에 반드시 호출해 파라미터 이름을 추측하지 마세요.", {
+        list_id: z.string().optional().describe("공공데이터 목록 ID(예: '15057511'). data.go.kr/data/{list_id}/openapi.do 의 숫자"),
+        swagger_url: z.string().optional().describe("Swagger JSON URL(데이터셋 검색 결과의 swagger_json_url 또는 infuser.odcloud.kr/oas/docs?namespace=...)"),
+    }, describePublicApiTool);
+    server.tool("call_public_api", "공공데이터 오픈API 범용 호출. describe_public_api에서 받은 call_url과 요청변수로 호출하면 서버가 serviceKey를 자동 주입(절대 params에 넣지 말 것)하고, XML/JSON·EUC-KR을 정규화해 rows로 반환. 전통형(apis.data.go.kr, pageNo/numOfRows)·odcloud형(api.odcloud.kr, page/perPage) 페이지 처리 자동. 허용 도메인: *.go.kr, *.or.kr, *.re.kr, odcloud.kr. 오류 시 코드별 원인과 활용신청 링크를 안내.", {
+        url: z.string().url().describe("호출 URL(오퍼레이션까지 포함). 예: https://apis.data.go.kr/1613000/RTMSDataSvcAptTrade/getRTMSDataSvcAptTrade"),
+        params: z.record(z.union([z.string(), z.number(), z.boolean()])).optional().describe("요청변수 {이름: 값}. 예: {LAWD_CD:'11215', DEAL_YMD:'202609'}. odcloud형 조건은 {'cond[컬럼::EQ]': 값}"),
+        method: z.enum(["GET", "POST"]).optional().describe("기본 GET. json_body가 있으면 POST"),
+        json_body: z.any().optional().describe("POST JSON 본문(예: 국세청 사업자상태조회 {b_no:['1234567890']})"),
+        all_pages: z.boolean().optional().describe("true면 max_rows까지 다음 페이지 자동 수집(기본 false)"),
+        max_rows: z.number().int().min(1).max(2000).optional().describe("반환 최대 행 수(기본 100, 최대 2000)"),
+        page_size: z.number().int().min(1).max(1000).optional().describe("페이지 크기(numOfRows/perPage). 기본 min(max_rows,1000)"),
+        key_param: z.string().optional().describe("인증키 파라미터 이름. 기본 'serviceKey'(일부 API는 'ServiceKey')"),
+        inject_key: z.boolean().optional().describe("false면 인증키를 넣지 않음(키 불필요 API). 기본 true"),
+        list_id: z.string().optional().describe("오류 안내에 활용신청 링크를 붙이기 위한 list_id(선택)"),
+    }, callPublicApiTool);
     return server;
 }
 const transportType = process.env.MCP_TRANSPORT || "stdio";
@@ -167,13 +192,13 @@ if (transportType === "http") {
     app.delete("/mcp", methodNotAllowed);
     const PORT = Number(process.env.PORT || 3000);
     app.listen(PORT, "0.0.0.0", () => {
-        console.error(`korean-land-mcp v2.1 HTTP on :${PORT}/mcp (auth ${TOKEN ? "on" : "off"})`);
+        console.error(`korean-land-mcp v2.2 HTTP on :${PORT}/mcp (auth ${TOKEN ? "on" : "off"})`);
     });
 }
 else {
     const server = createServer();
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error("korean-land-mcp v2.1 ready (stdio) — 12 tools wired");
+    console.error("korean-land-mcp v2.2 ready (stdio) — 16 tools wired");
 }
 //# sourceMappingURL=server.js.map

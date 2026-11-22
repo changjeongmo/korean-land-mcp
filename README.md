@@ -193,3 +193,18 @@ MIT License.
 ## 🤝 기여
 
 이슈·PR 환영. 새 V-World 레이어 추가 시 `src/tools/*.ts` 의 `LAYERS` 배열에 `{ id, label }` 만 추가하면 자동으로 `queryOverlays` 파이프라인에 편입됩니다.
+
+
+## 공공데이터포털 전체 게이트웨이 (v2.2)
+
+전용 도구가 없는 공공데이터포털(data.go.kr) 데이터를 3단계로 조회합니다. 오픈API 1만여 종과 파일데이터 자동변환 API(odcloud)를 포함합니다.
+
+| 도구 | 역할 |
+|---|---|
+| `search_public_data` | 카탈로그 검색(목록조회서비스 15077093). 이름·기관·자동승인·오퍼레이션·상세링크 |
+| `describe_public_api` | list_id로 오퍼레이션별 call_url·요청변수·응답항목. odcloud·POST형은 Swagger 자동 해석 |
+| `call_public_api` | 범용 호출. serviceKey 자동 주입·마스킹, XML/JSON/EUC-KR 정규화, 페이지 자동 수집, 오류코드별 조치 안내 |
+
+**사전 준비**: data.go.kr에서 `공공데이터활용지원센터_목록조회서비스`(15077093) 활용신청(자동승인). 실제로 호출할 API도 각각 활용신청해야 합니다(같은 인증키 사용, 반영까지 최대 1~2시간).
+
+**보안**: 호출 도메인은 `*.go.kr`, `*.or.kr`, `*.re.kr`, `odcloud.kr`로 제한(IP·localhost 차단). 사용자가 넘긴 키성 파라미터는 버리고 서버 키를 주입하며, 응답·오류의 키는 `***`로 가립니다.
