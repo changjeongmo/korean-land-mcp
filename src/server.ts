@@ -19,6 +19,7 @@ import { getTransitAccessTool } from "./tools/get_transit_access.js";
 import { getDriveTimesTool } from "./tools/get_drive_times.js";
 import { getNearbyFacilitiesTool } from "./tools/get_nearby_facilities.js";
 import { KAKAO_CATEGORIES } from "./lib/kakao.js";
+import { getMapLinksTool } from "./tools/get_map_links.js";
 import { searchPublicDataTool, describePublicApiTool, callPublicApiTool } from "./tools/public_data.js";
 
 dotenv.config();
@@ -26,7 +27,7 @@ dotenv.config();
 function createServer(): McpServer {
 const server = new McpServer({
   name: "korean-land-mcp",
-  version: "2.2.0",
+  version: "2.3.0",
   description:
     "Korean parcel & zoning MCP backed by V-World. Resolves addresses/PNUs into spatial facts (필지, 용도지역/지구/구역, 지구단위계획, 도시계획시설, 다른 법령 지정사항). Also: 국토부 실거래가 (DATA_GO_KR_KEY) and 교통·생활인프라 (KAKAO_REST_KEY). Plus 공공데이터포털 전체 게이트웨이(search_public_data → describe_public_api → call_public_api): 오픈API 1만여 종·파일데이터를 검색·명세확인·호출. No mock fallback — failures are real errors. For 법령·조례 text, pair with korean-law MCP.",
 });
@@ -107,7 +108,7 @@ server.tool(
       {
         type: "text" as const,
         text: [
-          "korean-land-mcp v2.2 — V-World + 실거래가 + 교통 (mock fallback 없음)",
+          "korean-land-mcp v2.3 — V-World + 실거래가 + 교통 (mock fallback 없음)",
           "",
           "Tools:",
           "- resolve_parcel(query): address|PNU → canonical parcel",
@@ -208,6 +209,16 @@ server.tool(
   getNearbyFacilitiesTool
 );
 
+server.tool(
+  "get_map_links",
+  "대상지 지도 바로가기: 주소·PNU → 카카오맵(다음지도) 지도·로드뷰·길찾기, 네이버지도 웹검색·앱(nmap://) 마커, 토지이음 토지이용계획 열람 링크를 한 번에 생성. 입지분석 보고서·현장답사용. 지도 이미지가 필요하면 get_cadastral_map. 키 불필요(좌표는 V-World, 실패 시 카카오 주소검색).",
+  {
+    ...QUERY_SCHEMA,
+    name: z.string().optional().describe("지도에 표시할 이름(기본: 주소). 예: '자양동 사업부지'"),
+  },
+  getMapLinksTool
+);
+
 // ───────── 공공데이터포털 전체 게이트웨이 (DATA_GO_KR_KEY) ─────────
 server.tool(
   "search_public_data",
@@ -301,11 +312,11 @@ if (transportType === "http") {
 
   const PORT = Number(process.env.PORT || 3000);
   app.listen(PORT, "0.0.0.0", () => {
-    console.error(`korean-land-mcp v2.2 HTTP on :${PORT}/mcp (auth ${TOKEN ? "on" : "off"})`);
+    console.error(`korean-land-mcp v2.3 HTTP on :${PORT}/mcp (auth ${TOKEN ? "on" : "off"})`);
   });
 } else {
   const server = createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("korean-land-mcp v2.2 ready (stdio) — 16 tools wired");
+  console.error("korean-land-mcp v2.3 ready (stdio) — 17 tools wired");
 }
